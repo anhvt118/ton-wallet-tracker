@@ -10,8 +10,10 @@ import requests
 
 # Mỗi token: tên hiển thị -> địa chỉ contract (jetton master) trên TON
 TOKENS = {
-    "DIDI": "EQCRUitj7ehYvSzZKTyhq02-HpbhLNgAvnMF5I7Dx31QxIAH",
+   "DIDI": "EQCRUitj7ehYvSzZKTyhq02-HpbhLNgAvnMF5I7Dx31QxIAH",
     "YODA": "EQC7vuKEYLdC72YhUWt3AUVA-Oi66Q1DxTHXH7r6pXaV50j7",
+    "UTYA": "EQBaCgUwOoc6gHCNln_oJzb0mVs79YG7wYoavh-o1ItaneLA",
+    "REDO": "EQBZ_cafPyDr5KUTs0aNxh0ZTDhkpEZONmLJA2SNGlLm4Cko",
 }
 
 TOP_N = 100  # số ví top đầu muốn theo dõi mỗi token

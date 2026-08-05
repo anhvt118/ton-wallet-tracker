@@ -2,9 +2,9 @@ name: Update wallet tracker
 
 on:
   schedule:
-    # Chạy lúc 00:00 và 12:00 UTC = 07:00 và 19:00 giờ Việt Nam
-    - cron: "0 0,12 * * *"
-  workflow_dispatch: {}   # cho phép bấm "Run workflow" chạy tay trên GitHub khi cần
+    # 01:00 UTC = 08:00 giờ Việt Nam, chạy 1 lần/ngày
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -24,12 +24,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tracker update
+      - name: Update Excel (backup)
         env:
           TONAPI_KEY: ${{ secrets.TONAPI_KEY }}
         run: python update_tracker.py
 
-      - name: Commit updated file
+      - name: Push to Google Sheets
+        env:
+          TONAPI_KEY: ${{ secrets.TONAPI_KEY }}
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: python push_to_gsheets.py
+
+      - name: Commit updated Excel file
         run: |
           git config user.name "wallet-tracker-bot"
           git config user.email "actions@users.noreply.github.com"

@@ -1,44 +1,21 @@
 """
-Tự động lấy top 100 ví nắm giữ (holders) của các token trên TON qua TonAPI,
-rồi cập nhật vào file Excel theo đúng format đang dùng:
-- Mỗi sheet = 1 token
-- Mỗi dòng = 1 địa chỉ ví
-- Mỗi lần chạy = thêm 1 cột ngày giờ + 1 cột "Chênh lệch" (so với lần chạy trước)
-  Chênh lệch dương -> tô xanh, âm -> tô đỏ
-- Ví mới xuất hiện trong top 100 -> thêm dòng mới
-- Ví cũ rớt khỏi top 100 -> coi số dư ngày đó là 0
+Ghi top holders của các token ra file Excel (data/theo_doi_vi.xlsx).
+Mỗi sheet = 1 token, mỗi lần chạy thêm 1 cột ngày giờ + 1 cột "Chênh lệch".
 
 Chạy thủ công:
-    export TONAPI_KEY=xxxx   # (tùy chọn, không có vẫn chạy được nhưng dễ bị rate-limit)
+    export TONAPI_KEY=xxxx   # tùy chọn nhưng khuyến khích có
     python update_tracker.py
-
-Cấu hình token cần theo dõi ở biến TOKENS bên dưới.
 """
 
 import os
-import time
-import requests
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from datetime import datetime, timezone, timedelta
 
-# ============ CẤU HÌNH ============
+from ton_data import TOKENS, fetch_token_snapshot
 
-# Mỗi token: tên hiển thị (cũng là tên sheet) -> địa chỉ contract (jetton master) trên TON
-TOKENS = {
-    "DIDI": "EQCRUitj7ehYvSzZKTyhq02-HpbhLNgAvnMF5I7Dx31QxIAH",
-    "YODA": "EQC7vuKEYLdC72YhUWt3AUVA-Oi66Q1DxTHXH7r6pXaV50j7",
-}
-
-TOP_N = 100  # số ví top đầu muốn theo dõi mỗi token
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "theo_doi_vi.xlsx")
-TONAPI_BASE = "https://tonapi.io"
-TONAPI_KEY = os.environ.get("TONAPI_KEY", "")  # optional nhưng khuyến khích có
-
-# Giờ Việt Nam để đặt tên cột ngày cho dễ đọc
 VN_TZ = timezone(timedelta(hours=7))
-
-# ============ STYLE DÙNG CHUNG ============
 
 HEADER_FONT = Font(name="Arial", bold=True, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
@@ -51,45 +28,11 @@ GREEN_FONT = Font(name="Arial", color="006100")
 RED_FONT = Font(name="Arial", color="9C0006")
 
 
-def tonapi_get(path, params=None):
-    headers = {}
-    if TONAPI_KEY:
-        headers["Authorization"] = f"Bearer {TONAPI_KEY}"
-    for attempt in range(5):
-        resp = requests.get(f"{TONAPI_BASE}{path}", params=params, headers=headers, timeout=30)
-        if resp.status_code == 429:
-            # rate limited -> chờ rồi thử lại
-            time.sleep(3 * (attempt + 1))
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    resp.raise_for_status()
-
-
-def get_jetton_decimals(jetton_address):
-    info = tonapi_get(f"/v2/jettons/{jetton_address}")
-    meta = info.get("metadata", {})
-    return int(meta.get("decimals", 9)), meta.get("symbol", "")
-
-
-def get_top_holders(jetton_address, limit=100):
-    data = tonapi_get(f"/v2/jettons/{jetton_address}/holders", params={"limit": limit, "offset": 0})
-    holders = []
-    for item in data.get("addresses", []):
-        owner = item.get("owner", {}) or {}
-        addr = owner.get("address") or item.get("address")
-        balance_raw = item.get("balance", "0")
-        holders.append((addr, int(balance_raw)))
-    return holders
-
-
 def load_or_create_workbook(path):
     if os.path.exists(path):
         return openpyxl.load_workbook(path)
     wb = openpyxl.Workbook()
-    # xóa sheet mặc định, mỗi token sẽ tự tạo sheet riêng
-    default_sheet = wb.active
-    wb.remove(default_sheet)
+    wb.remove(wb.active)
     return wb
 
 
@@ -111,9 +54,8 @@ def ensure_sheet(wb, token_name):
     return ws
 
 
-def update_sheet(ws, token_name, holders, timestamp_label, decimals):
-    # holders: list[(address, balance_raw_int)]
-    human_balances = {addr: bal / (10 ** decimals) for addr, bal in holders}
+def update_sheet(ws, token_name, holders, timestamp_label):
+    human_balances = dict(holders)
 
     last_col = ws.max_column
     if last_col >= 3 and ws.cell(row=1, column=last_col).value == "Chênh lệch":
@@ -121,7 +63,7 @@ def update_sheet(ws, token_name, holders, timestamp_label, decimals):
     elif last_col >= 3:
         prev_col = last_col
     else:
-        prev_col = None  # sheet vừa tạo, chưa có cột ngày nào
+        prev_col = None
 
     existing = {}
     for r in range(2, ws.max_row + 1):
@@ -129,14 +71,12 @@ def update_sheet(ws, token_name, holders, timestamp_label, decimals):
         if addr:
             existing[addr] = r
 
-    # ví cũ không còn trong top N hôm nay -> balance = 0
     all_addrs = dict(human_balances)
     for addr in existing:
         if addr not in all_addrs:
             all_addrs[addr] = 0
 
     next_row = ws.max_row + 1
-
     new_col = last_col + 1
     diff_col = new_col + 1
     ws.cell(row=1, column=new_col, value=timestamp_label)
@@ -192,18 +132,14 @@ def update_sheet(ws, token_name, holders, timestamp_label, decimals):
 def main():
     os.makedirs(os.path.dirname(EXCEL_PATH), exist_ok=True)
     wb = load_or_create_workbook(EXCEL_PATH)
-
-    now_vn = datetime.now(VN_TZ)
-    timestamp_label = now_vn.strftime("%d/%m/%Y %H:%M")
+    timestamp_label = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
 
     for token_name, jetton_address in TOKENS.items():
-        print(f"[{token_name}] fetching decimals + top {TOP_N} holders...")
-        decimals, symbol = get_jetton_decimals(jetton_address)
-        holders = get_top_holders(jetton_address, limit=TOP_N)
-        print(f"[{token_name}] got {len(holders)} holders (decimals={decimals}, symbol={symbol})")
-
+        print(f"[{token_name}] fetching top holders...")
+        snap = fetch_token_snapshot(token_name, jetton_address)
+        print(f"[{token_name}] got {len(snap['holders'])} holders")
         ws = ensure_sheet(wb, token_name)
-        update_sheet(ws, token_name, holders, timestamp_label, decimals)
+        update_sheet(ws, token_name, snap["holders"], timestamp_label)
 
     wb.save(EXCEL_PATH)
     print(f"Saved -> {EXCEL_PATH}")

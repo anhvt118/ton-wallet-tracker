@@ -45,6 +45,7 @@ RED = Color(0.98, 0.78, 0.81)
 
 
 def col_letter(idx0):
+    """idx0: cột 0-based -> chữ cột kiểu A, B, ..., Z, AA, ..."""
     letters = ""
     n = idx0 + 1
     while n > 0:
@@ -67,6 +68,7 @@ def get_or_create_worksheet(sh, title, rows=300, cols=26):
 
 
 def update_token_sheet_matrix(ws, token_name, holders, timestamp_label):
+    """Ghi dữ liệu 1 token vào sheet dạng ma trận, trả về summary cho Dashboard."""
     values = ws.get_all_values()
     if not values:
         header = ["Địa chỉ ví", "Token"]
@@ -77,6 +79,7 @@ def update_token_sheet_matrix(ws, token_name, holders, timestamp_label):
     has_diff_last = len(header) >= 3 and header[-1] == "Chênh lệch"
     prev_date_idx = (len(header) - 2) if has_diff_last else (len(header) - 1 if len(header) >= 3 else None)
 
+    # map địa chỉ -> chỉ số dòng trong `values` (0-based, 0 = header)
     addr_row = {}
     for i, row in enumerate(values[1:], start=1):
         if row and row[0]:
@@ -88,12 +91,14 @@ def update_token_sheet_matrix(ws, token_name, holders, timestamp_label):
         if addr not in all_addrs:
             all_addrs[addr] = 0
 
-    new_date_idx = len(header)
-    diff_idx = new_date_idx + 1
+    new_date_idx = len(header)          # 0-based index cột ngày mới
+    diff_idx = new_date_idx + 1         # 0-based index cột chênh lệch mới
 
+    # mở rộng header
     header = header + [timestamp_label, "Chênh lệch"]
     values[0] = header
 
+    # đảm bảo mọi dòng đủ độ dài trước khi ghi cột mới
     def pad(row, length):
         return row + [""] * (length - len(row))
 
@@ -131,6 +136,8 @@ def update_token_sheet_matrix(ws, token_name, holders, timestamp_label):
         if diff != "":
             movers.append((addr, diff))
 
+    # đảm bảo mọi dòng có cùng độ dài (kể cả những dòng không đổi hôm nay - đã pad ở trên,
+    # nhưng dòng cũ có thể đã đủ dài từ trước, không cần đụng vào)
     final_len = len(header)
     for i in range(len(values)):
         values[i] = pad(values[i], final_len)
@@ -138,12 +145,14 @@ def update_token_sheet_matrix(ws, token_name, holders, timestamp_label):
     ws.resize(rows=max(len(values) + 20, ws.row_count), cols=max(final_len + 2, ws.col_count))
     ws.update("A1", values, value_input_option="USER_ENTERED")
 
+    # định dạng header 2 cột mới
     c1, c2 = col_letter(new_date_idx), col_letter(diff_idx)
     format_cell_range(ws, f"{c1}1:{c2}1", HEADER_FMT)
-    if new_date_idx == 2:
+    if new_date_idx == 2:  # lần đầu tạo sheet -> đóng băng + format cột A/B
         set_frozen(ws, rows=1, cols=2)
         format_cell_range(ws, "A1:B1", HEADER_FMT)
 
+    # conditional formatting cho cột Chênh lệch vừa thêm
     rules = get_conditional_format_rules(ws)
     rules.append(ConditionalFormatRule(
         ranges=[GridRange(sheetId=ws.id, startRowIndex=1, endRowIndex=20000,
